@@ -5,12 +5,17 @@ using UnityEngine.UI;
 
 class Orchestartor : MonoBehaviour
 {
+    private const string FINAL_SCORE_MESSAGE_PREFIX = "Ваш счет: ";
+    private const string WIN_MESSAGE = "Победа!";
+    private const float DEFAULT_DELAY = 0.5f;
+
     // Directions for checking matches regarding pivot element with indexes (0, 0) in "short" row. Up, up + right, right, down + right, down, left. 
-    private readonly (int row, int column)[] MACTH_DIRECTIONS_IN_SHORT_ROW = { (-1, 0), (-1, 1), (0, 1), (1, 1), (1, 0), (0, -1) };
+    private readonly (int row, int column)[] shortRowMatchDirections= { (-1, 0), (-1, 1), (0, 1), (1, 1), (1, 0), (0, -1) };
 
     // Directions for checking matches regarding pivot element with indexes (0, 0) in "long" row. Up, right, down, down + left, left, up + left. 
-    private readonly (int row, int column)[] MACTH_DIRECTIONS_IN_LONG_ROW = { (-1, 0), (0, 1), (1, 0), (1, -1), (0, -1), (-1, -1) };
-    private readonly LinkDirection[] availableLinkDirections = {
+    private readonly (int row, int column)[] longRowMatchDirections = { (-1, 0), (0, 1), (1, 0), (1, -1), (0, -1), (-1, -1) };
+    
+    private static readonly LinkDirection[] availableLinkDirections = {
         LinkDirection.UP_LEFT,
         LinkDirection.UP_RIGHT,
         LinkDirection.RIGHT,
@@ -26,7 +31,7 @@ class Orchestartor : MonoBehaviour
     [Tooltip("Bubble count horizontally.")]
     public int width;
 
-    [Range(5, 50)]
+    [Range(3, 15)]
     [Tooltip("Bubble count vertically.")]
     public int height;
 
@@ -50,6 +55,12 @@ class Orchestartor : MonoBehaviour
     [Tooltip("UI element that will render remaining bubbles counter.")]
     public GameObject bubblesCounter;
 
+    [Tooltip("UI element that will render current score.")]
+    public GameObject score;
+
+    [Tooltip("Game over window.")]
+    public GameObject gameOverWindow;
+
     [HideInInspector]
     internal int GridWidth { get { return width; } }
 
@@ -61,7 +72,7 @@ class Orchestartor : MonoBehaviour
 
     private GameObject[,] grid;
     private GameObject launcher;
-
+    private float currentScore;
 
     private void Start()
     {
@@ -69,25 +80,36 @@ class Orchestartor : MonoBehaviour
         launcher.GetComponent<Launcher>().Fired += FocusOnBubble;
         launcher.GetComponent<Launcher>().LoadBubble(CreateBubble());
 
+        UpdateScore(0);
         PrepareNextStep();
-
         FillGrid();
-    }
-
-    private void Update()
-    {
-
     }
 
     internal bool IsEmpty(Vector3 position)
     { 
-        return IsEmpty(FindCellPosition(position));
+        return IsEmpty(FindCellPosition(position), true);
     }
 
-    public (int row, int column) FindCellPosition(Vector3 position)
+    /// <summary>
+    /// Checks cell for emptiness.
+    /// </summary>
+    /// <param name="cellPosition">Cell coordinates.</param>
+    /// <param name="checkOutside">Flag wich defines need check outside cell or not.</param>
+    /// <returns>Check result.</returns>
+    internal bool IsEmpty((int row, int column) cellPosition, bool checkOutside)
+    {
+        if (CheckBounds(cellPosition))
+        {
+            return grid[cellPosition.row, cellPosition.column] == null;
+        }
+
+        return checkOutside;
+    }
+
+    internal (int row, int column) FindCellPosition(Vector3 position)
     {
         int row = (int)Math.Ceiling((transform.position.y - position.y) / interval) - 1;
-        int column = (int)Math.Ceiling((position.x - transform.position.x - (row % 2) * interval / 2) / interval) - 1;
+        int column = (int)Math.Ceiling((position.x - transform.position.x + (row % 2) * interval / 2) / interval) - 1;
 
         return (row, column);
     }
@@ -101,8 +123,21 @@ class Orchestartor : MonoBehaviour
 
     private void PrepareNextStep()
     {
-        launcher.GetComponent<Launcher>().LoadBubble(CreateBubble());
-        launcher.GetComponent<Launcher>().Reload();
+        PrepareNextStep(DEFAULT_DELAY);
+    }
+
+    private void PrepareNextStep(float delay)
+    {
+        if (bubblesCount != 0)
+        {
+            launcher.GetComponent<Launcher>().LoadBubble(CreateBubble());
+        }
+        else
+        {
+            bubblesCount--;
+        }
+
+        launcher.GetComponent<Launcher>().Reload(delay);
     }
 
     private void FillGrid()
@@ -113,7 +148,7 @@ class Orchestartor : MonoBehaviour
         }
 
         Vector2 pivotPosition = new Vector2(transform.position.x, transform.position.y);
-        grid = new GameObject[maxHeight, width * 2];
+        grid = new GameObject[maxHeight, width];
 
         for (int i = 0; i < height; i++)
         {
@@ -123,12 +158,6 @@ class Orchestartor : MonoBehaviour
                 bubble.GetComponent<Bubble>().GridPosition = (i, j);
 
                 grid[i, j] = bubble;
-                // bubble.GetComponent<Rigidbody2D>().gravityScale = 0.5f;
-
-                //SpringJoint2D springJoint = (SpringJoint2D) grid[i, j].AddComponent(typeof(SpringJoint2D));
-                //springJoint.connectedAnchor = pivotPosition;
-                //springJoint.frequency = 1;
-                //springJoint.dampingRatio = 1;
 
                 SpringJoint2D springJoint = bubble.GetComponent<SpringJoint2D>();
                 springJoint.connectedAnchor = pivotPosition;
@@ -143,13 +172,10 @@ class Orchestartor : MonoBehaviour
         }
     }
 
-    private GameObject CreateBubble(/*bool useCounter*/)
+    private GameObject CreateBubble()
     {
-        //if (useCounter)
-        //{
-            bubblesCount--;
-            bubblesCounter.GetComponent<Text>().text = bubblesCount.ToString();
-        //}
+        bubblesCount--;
+        bubblesCounter.GetComponent<Text>().text = bubblesCount.ToString();
 
         return CreateBubble(UnityEngine.Random.Range(0, availableBubbles.Length), new Vector3(0, 0, 1));
     }
@@ -158,8 +184,6 @@ class Orchestartor : MonoBehaviour
     {
         return Instantiate(availableBubbles[variant], position, Quaternion.identity);
     }
-
-    
 
     private void FocusOnBubble(GameObject bubble)
     {
@@ -175,223 +199,122 @@ class Orchestartor : MonoBehaviour
 
     private void ProcessShotResult(GameObject projectile, GameObject collided)
     {
-        if (!TrySnap(projectile, collided))
+        if (!TrySnap(projectile, collided, projectile.GetComponent<Bubble>().HasMaxImpulse))
         {
-            // Game over
-            transform.Find("GameOverPane").GetComponent<SpriteRenderer>().enabled = true;
-
-            Debug.Log("Game Over");
+            FinishGame(false);
         }
         else
         {
             CheckForMatch(projectile);
-            CheckForHanging();
 
-            if (bubblesCount == 0)
+            bool hasHangingElements = !CheckForHanging();
+
+            bool win = CheckForWin();
+
+            if (bubblesCount < 0)
             {
-                // Game over
-                transform.Find("GameOverPane").GetComponent<SpriteRenderer>().enabled = true;
-
-                Debug.Log("Game Over");
+                FinishGame(false);
+            }
+            else if (win)
+            {
+                FinishGame(true);
             }
             else
             {
-                PrepareNextStep();
+                if (hasHangingElements)
+                {
+                    PrepareNextStep(2.5f);
+                }
+                else
+                {
+                    PrepareNextStep();
+                }
             }
         }
     }
 
-    //private (int, int) SnapBubble(GameObject projectile, GameObject collided)
-    //{
-    //    int offsetByColumns = (int)Mathf.Sign(projectile.transform.position.x - collided.transform.position.x);
-    //    int offsetByRows = (int)Mathf.Sign(projectile.transform.position.y - collided.transform.position.y);
-
-    //    (int row, int column) collidedBubbleIndexes = FindCellIndexes(collided.GetComponent<SpringJoint2D>().connectedAnchor);
-
-    //    (int row, int column) projectileBubbleIndexes = (collidedBubbleIndexes.row - offsetByRows, collidedBubbleIndexes.column + offsetByColumns + collidedBubbleIndexes.row % 2);
-
-    //    grid[projectileBubbleIndexes.row, projectileBubbleIndexes.column] = projectile;
-
-    //    SpringJoint2D springJoint = projectile.GetComponent<SpringJoint2D>();
-
-    //    //SpringJoint2D springJoint = bubble.GetComponent<SpringJoint2D>();
-    //    //springJoint.connectedAnchor = pivotPosition;
-    //    //springJoint.enabled = true;
-
-    //    // X component = reference point + start offset for even rows + column position; Y comonent = reference point - row position.
-    //    springJoint.connectedAnchor = new Vector3(transform.position.x + (interval / 2 * ((collidedBubbleIndexes.row + 1) % 2)) + projectileBubbleIndexes.column * interval, transform.position.y - projectileBubbleIndexes.row * interval);
-    //    springJoint.enabled = true;
-    //    springJoint.distance = 0;
-
-    //    projectile.GetComponent<Rigidbody2D>().gravityScale = 0.5f;
-
-    //    UnfocusOnBubble(projectile);
-
-
-
-    //    //int upperRowIndex =  Mathf.Abs((int) Math.Truncate((transform.position.y - projectile.transform.position.y) / interval));
-    //    //int lowerRowIndex =  upperRowIndex + 1;
-    //    //int leftColumnIndex =  Mathf.Abs((int) Math.Truncate((transform.position.x + interval * upperRowIndex % 2 - projectile.transform.position.x) / interval));
-    //    //int rightColumnIndex =  leftColumnIndex + 1;
-
-    //    //List<Vector3> vacantPlaces = new List<Vector3>(4);
-
-    //    //if (grid[upperRowIndex, rightColumnIndex] == null)
-    //    //{
-    //    //    vacantPlaces.Add(new Vector3(transform.position.x + interval * rightColumnIndex, transform.position.y - interval * upperRowIndex));
-    //    //}
-    //    //if (grid[lowerRowIndex, rightColumnIndex] == null)
-    //    //{
-    //    //    vacantPlaces.Add(new Vector3(transform.position.x + interval * rightColumnIndex, transform.position.y - interval * lowerRowIndex));
-    //    //}
-    //    //if (grid[lowerRowIndex, leftColumnIndex] == null)
-    //    //{
-    //    //    vacantPlaces.Add(new Vector3(transform.position.x + interval * leftColumnIndex, transform.position.y - interval * lowerRowIndex));
-    //    //}
-    //    //if (grid[upperRowIndex, leftColumnIndex] == null)
-    //    //{
-    //    //    vacantPlaces.Add(new Vector3(transform.position.x + interval * leftColumnIndex, transform.position.y - interval * upperRowIndex));
-    //    //}
-
-
-
-    //    //// Finding vacant positions
-    //    //float upperRowLongitude = transform.position.y - (float) Math.Truncate((transform.position.y - projectile.transform.position.y) / interval);
-    //    //float lowerRow = upperRowLongitude - interval;
-    //    //float leftRowLatitude = transform.position.x - (float) Math.Truncate((transform.position.x - projectile.transform.position.x) / interval);
-    //    //float rightRowLatitude = upperRowLongitude + interval;
-
-    //    //if (Mathf.Min(Vector3.Distance(projectile.transform.position, )))
-    //    //{
-
-    //    //}
-    //    //if (collided.transform.position.x > projectile.transform.position.x)
-    //    //{
-    //    //    // 
-    //    //}
-
-    //    return projectileBubbleIndexes;
-    //}
-
-    //private bool TrySnap(GameObject projectile, GameObject target)
-    //{
-    //    Bubble targetBubble = target.GetComponent<Bubble>();
-
-    //    int offsetByColumns = (int)Mathf.Sign(projectile.transform.position.x - target.transform.position.x);
-
-    //    // Direction of rows index growth is opposite with respect to Y axis.
-    //    int offsetByRows = (int)Mathf.Sign(target.transform.position.y - projectile.transform.position.y);
-
-    //    // Buble can be placed only in two potential places. By default case it is left or right direction for first and up or down for second. 
-    //    (int row, int column) first = (targetBubble.GridPosition.row, targetBubble.GridPosition.column + offsetByColumns);
-    //    (int row, int column) second = (targetBubble.GridPosition.row + offsetByRows, targetBubble.GridPosition.column);
-
-    //    // Uniq cases
-
-    //    // For short row
-    //    if (isShort(targetBubble.GridPosition.row))
-    //    {
-    //        if (offsetByColumns >= 0 && targetBubble.GridPosition.column < width - 1)
-    //        {
-    //            second.column += offsetByColumns;
-    //        }
-    //    }
-
-    //    // For long row
-    //    else
-    //    {
-    //        // Collision on left side
-    //        if (offsetByColumns < 0)
-    //        {
-    //            // 
-    //            if (targetBubble.GridPosition.column > 0)
-    //            {
-    //                second.column += offsetByColumns;
-    //            }
-    //        }
-    //        // Collision on left side
-    //        else
-    //        {
-    //            first = (targetBubble.GridPosition.row + offsetByRows * 2, targetBubble.GridPosition.column);
-    //            second = (targetBubble.GridPosition.row + offsetByRows * 2, targetBubble.GridPosition.column);
-    //        }
-    //    }
-
-    //    (int row, int column)? cell = FindNearestCell(projectile, out Vector3 position, first, second);
-
-    //    if (cell != null)
-    //    {
-    //        grid[cell.Value.row, cell.Value.column] = projectile;
-    //        projectile.GetComponent<Bubble>().GridPosition = cell.Value;
-    //        projectile.GetComponent<Bubble>().BorderCollisionEnabled = false;
-
-    //        SpringJoint2D springJoint = projectile.GetComponent<SpringJoint2D>();
-    //        springJoint.connectedAnchor = position;
-    //        springJoint.enabled = true;
-    //        springJoint.distance = 0;
-
-    //        projectile.GetComponent<Rigidbody2D>().gravityScale = 0.5f;
-
-    //        UnfocusOnBubble(projectile);
-    //    }
-
-    //    return cell != null;
-    //}
-
-    private bool TrySnap(GameObject projectile, GameObject target)
+    private void UpdateScore(float value)
     {
-        List<(int, int)> availableCells = new List<(int, int)>(3);
-        (int, int) cellPosition = target.GetComponent<Bubble>().GridPosition;
+        currentScore += value;
+        score.GetComponent<Text>().text = currentScore.ToString();
+    }
 
-        // I or IV quarter
-        if (projectile.transform.position.x >= target.transform.position.x)
+    private void FinishGame(bool win)
+    {
+        PlayerPrefs.SetFloat(DateTime.Now.ToString(), currentScore);
+
+        gameOverWindow.transform.Find("Panel/Score").GetComponent<Text>().text = win ? WIN_MESSAGE + Environment.NewLine : string.Empty +
+            FINAL_SCORE_MESSAGE_PREFIX + currentScore;
+        gameOverWindow.SetActive(true);
+    }
+
+    private bool TrySnap(GameObject projectile, GameObject target, bool swap)
+    {
+        (int row, int column)? destinationCell;
+        (int, int) targetCell = target.GetComponent<Bubble>().GridPosition;
+        Vector3 destinationPosition = Vector3.zero;
+
+        if (swap)
         {
-            availableCells.Add(GetAdjacentCellPosition(cellPosition, LinkDirection.RIGHT));
+            destinationCell = target.GetComponent<Bubble>().GridPosition;
+            destinationPosition = target.GetComponent<SpringJoint2D>().connectedAnchor;
 
-            // I quarter
-            if (projectile.transform.position.y >= target.transform.position.y)
-            {
-                availableCells.Add(GetAdjacentCellPosition(cellPosition, LinkDirection.UP));
-                availableCells.Add(GetAdjacentCellPosition(cellPosition, LinkDirection.UP_RIGHT));
-            }
-            // IV quarter
-            else
-            {
-                availableCells.Add(GetAdjacentCellPosition(cellPosition, LinkDirection.DOWN_RIGHT));
-                availableCells.Add(GetAdjacentCellPosition(cellPosition, LinkDirection.DOWN));
-            }
+            target.GetComponent<Bubble>().Burst();
         }
-        // II or III quarter
         else
         {
-            availableCells.Add(GetAdjacentCellPosition(cellPosition, LinkDirection.LEFT));
+            List<(int, int)> availableCells = new List<(int, int)>(3);
 
-            // II quarter
-            if (projectile.transform.position.y >= target.transform.position.y)
+            // I or IV quarter
+            if (projectile.transform.position.x >= target.transform.position.x)
             {
-                availableCells.Add(GetAdjacentCellPosition(cellPosition, LinkDirection.UP));
-                availableCells.Add(GetAdjacentCellPosition(cellPosition, LinkDirection.UP_LEFT));
+                availableCells.Add(GetAdjacentCellPosition(targetCell, LinkDirection.RIGHT));
+
+                // I quarter
+                if (projectile.transform.position.y >= target.transform.position.y)
+                {
+                    availableCells.Add(GetAdjacentCellPosition(targetCell, LinkDirection.UP));
+                    availableCells.Add(GetAdjacentCellPosition(targetCell, LinkDirection.UP_RIGHT));
+                }
+                // IV quarter
+                else
+                {
+                    availableCells.Add(GetAdjacentCellPosition(targetCell, LinkDirection.DOWN_RIGHT));
+                    availableCells.Add(GetAdjacentCellPosition(targetCell, LinkDirection.DOWN));
+                }
             }
-            // III quarter
+            // II or III quarter
             else
             {
-                availableCells.Add(GetAdjacentCellPosition(cellPosition, LinkDirection.DOWN_LEFT));
-                availableCells.Add(GetAdjacentCellPosition(cellPosition, LinkDirection.DOWN));
+                availableCells.Add(GetAdjacentCellPosition(targetCell, LinkDirection.LEFT));
+
+                // II quarter
+                if (projectile.transform.position.y >= target.transform.position.y)
+                {
+                    availableCells.Add(GetAdjacentCellPosition(targetCell, LinkDirection.UP));
+                    availableCells.Add(GetAdjacentCellPosition(targetCell, LinkDirection.UP_LEFT));
+                }
+                // III quarter
+                else
+                {
+                    availableCells.Add(GetAdjacentCellPosition(targetCell, LinkDirection.DOWN_LEFT));
+                    availableCells.Add(GetAdjacentCellPosition(targetCell, LinkDirection.DOWN));
+                }
             }
+
+            destinationCell = FindEmptyCell(projectile, out destinationPosition, availableCells.ToArray());
         }
 
-        //Debug.Log("Target cell position: " + cellPosition);
-
-        (int row, int column)? cell = FindEmptyCell(projectile, out Vector3 position, availableCells.ToArray());
-
-        if (cell != null)
+        if (destinationCell != null)
         {
-            grid[cell.Value.row, cell.Value.column] = projectile;
-            projectile.GetComponent<Bubble>().GridPosition = cell.Value;
+            Debug.Log(destinationCell.Value);
+
+            grid[destinationCell.Value.row, destinationCell.Value.column] = projectile;
+            projectile.GetComponent<Bubble>().GridPosition = destinationCell.Value;
             projectile.GetComponent<Bubble>().BorderCollisionEnabled = false;
 
             SpringJoint2D springJoint = projectile.GetComponent<SpringJoint2D>();
-            springJoint.connectedAnchor = position;
+            springJoint.connectedAnchor = destinationPosition;
             springJoint.enabled = true;
             springJoint.distance = 0;
 
@@ -400,7 +323,7 @@ class Orchestartor : MonoBehaviour
             UnfocusOnBubble(projectile);
         }
 
-        return cell != null;
+        return destinationCell != null;
     }
 
     private bool CheckForMatch(GameObject pivotBubble)
@@ -420,6 +343,8 @@ class Orchestartor : MonoBehaviour
 
                 bubble.GetComponent<Bubble>().Burst();
             }
+
+            UpdateScore(Mathf.Pow(2, matchedBubbles.Count - 1));
 
             return true;
         }
@@ -444,7 +369,7 @@ class Orchestartor : MonoBehaviour
                     (int row, int column) upLeftCell = GetAdjacentCellPosition(currentCell, LinkDirection.UP_LEFT);
                     (int row, int column) upRightCell = GetAdjacentCellPosition(currentCell, LinkDirection.UP_RIGHT);
 
-                    if (IsEmpty(upLeftCell) && IsEmpty(upRightCell))
+                    if (IsEmpty(upLeftCell, true) && IsEmpty(upRightCell, true))
                     {
                         List<GameObject> buffer = new List<GameObject>() { current };
 
@@ -463,8 +388,11 @@ class Orchestartor : MonoBehaviour
                                 (int row, int column) = bubble.GetComponent<Bubble>().GridPosition;
                                 grid[row, column] = null;
 
+                                bubble.GetComponent<Bubble>().BorderCollisionEnabled = true;
                                 bubble.GetComponent<SpringJoint2D>().enabled = false;
                             }
+
+                            UpdateScore(Mathf.Pow(2, buffer.Count - 1));
                         }
                     }
                     else
@@ -480,24 +408,30 @@ class Orchestartor : MonoBehaviour
 
     private bool CheckForWin()
     {
-        // Counting empty cells.
-        int emptyCells = 0;
+        float counter = 0;
         for (int i = 0; i < width; i++)
         {
             if (grid[0, i] != null)
             {
-                emptyCells++;
+                counter++;
             }
         }
 
-        return emptyCells / width * 100 < emptyCellsPercentage;
+        if (counter / width * 100 < emptyCellsPercentage)
+        {
+            UpdateScore(Mathf.Pow(2, bubblesCount));
+
+            return true;
+        }
+
+        return false;
     }
 
     private void FindMatches(GameObject bubble, List<GameObject> resultContainer)
     {
         (int row, int column) gridPosition = bubble.GetComponent<Bubble>().GridPosition;
 
-        foreach ((int i, int j) in (isShort(bubble.GetComponent<Bubble>().GridPosition.row) ? MACTH_DIRECTIONS_IN_SHORT_ROW : MACTH_DIRECTIONS_IN_LONG_ROW))
+        foreach ((int i, int j) in (IsShort(bubble.GetComponent<Bubble>().GridPosition.row) ? shortRowMatchDirections : longRowMatchDirections))
         {
             if (gridPosition.row + i >= 0 && gridPosition.row + i < maxHeight && gridPosition.column + j >= 0 && gridPosition.column + j < width)
             {
@@ -539,16 +473,15 @@ class Orchestartor : MonoBehaviour
             }
         }
 
-        // Debug.Log("Incorrect available direction.");
-
         return false;
     }
 
     /// <summary>
-    /// Checks row for parity. Every row with not even index is "short" (has one less bubble).
+    /// Checks specified row for parity. Every row with not even index is "short" (has one less bubble).
     /// </summary>
-    /// <param name=""></param>
-    private bool isShort(int rowIndex)
+    /// <param rowIndex="">Index of row</param>
+    /// <returns>Check result.</returns>
+    private bool IsShort(int rowIndex)
     {
         return rowIndex % 2 == 1;
     }
@@ -561,12 +494,10 @@ class Orchestartor : MonoBehaviour
 
         foreach ((int row, int column) cellPosition in cellPositions)
         {
-            if (IsEmpty(cellPosition))
+            if (IsEmpty(cellPosition, false))
             {
                 Vector3 newPosition = FindCellAnchorPosition(cellPosition);
                 float distance = Vector3.Distance(pivot.transform.position, newPosition);
-
-                //Debug.Log("Disnatce to" + cellPosition + ": " + distance);
 
                 if (distance < min)
                 {
@@ -577,8 +508,6 @@ class Orchestartor : MonoBehaviour
                 }
             }
         }
-
-        //Debug.Log("Min distance: " + min);
 
         return result;
     }
@@ -602,17 +531,6 @@ class Orchestartor : MonoBehaviour
             cellPosition.column < width - cellPosition.row % 2;
     }
 
-    internal bool IsEmpty((int row, int column) cellPosition)
-    {
-        if (CheckBounds(cellPosition))
-        {
-            return grid[cellPosition.row, cellPosition.column] == null;
-        }
-
-        // TODO: check on error
-        return true;
-    }
-
     private (int, int) GetAdjacentCellPosition((int row, int column) source, LinkDirection direction)
     {
         switch (direction)
@@ -620,7 +538,7 @@ class Orchestartor : MonoBehaviour
             case LinkDirection.UP:
                 return (source.row - 2, source.column);
             case LinkDirection.UP_RIGHT:
-                if (!isShort(source.row))
+                if (!IsShort(source.row))
                 {
                     return (source.row - 1, source.column);
                 }
@@ -629,7 +547,7 @@ class Orchestartor : MonoBehaviour
             case LinkDirection.RIGHT:
                 return (source.row, source.column + 1);
             case LinkDirection.DOWN_RIGHT:
-                if (!isShort(source.row))
+                if (!IsShort(source.row))
                 {
                     return (source.row + 1, source.column);
                 }
@@ -638,7 +556,7 @@ class Orchestartor : MonoBehaviour
             case LinkDirection.DOWN:
                 return (source.row + 2, source.column);
             case LinkDirection.DOWN_LEFT:
-                if (isShort(source.row))
+                if (IsShort(source.row))
                 {
                     return (source.row + 1, source.column);
                 }
@@ -647,7 +565,7 @@ class Orchestartor : MonoBehaviour
             case LinkDirection.LEFT:
                 return (source.row, source.column - 1);
             case LinkDirection.UP_LEFT:
-                if (isShort(source.row))
+                if (IsShort(source.row))
                 {
                     return (source.row - 1, source.column);
                 }
@@ -659,7 +577,7 @@ class Orchestartor : MonoBehaviour
     }
 }
 
-// Represent lin direction in grid. First two digits in value is a offset by rows, other - offse by columns.
+/// Represent lin direction in grid. First two digits in value is a offset by rows, other - offse by columns.
 enum LinkDirection : int
 {
     UP,

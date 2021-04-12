@@ -21,12 +21,6 @@ public class Claim : MonoBehaviour
         container = new List<GameObject>(capacity);
     }
 
-    // Update is called once per frame
-    void Update()
-    {
-        
-    }
-
     public void Push(GameObject bubble)
     {
         bubble.transform.parent = transform;
