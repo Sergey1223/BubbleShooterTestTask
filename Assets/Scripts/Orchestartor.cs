@@ -307,8 +307,6 @@ class Orchestartor : MonoBehaviour
 
         if (destinationCell != null)
         {
-            Debug.Log(destinationCell.Value);
-
             grid[destinationCell.Value.row, destinationCell.Value.column] = projectile;
             projectile.GetComponent<Bubble>().GridPosition = destinationCell.Value;
             projectile.GetComponent<Bubble>().BorderCollisionEnabled = false;
